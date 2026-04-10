@@ -45,10 +45,10 @@ team_t team = {
 // 가용 리스트 조작 매크로 
 
 // 4바이트를 한 묶음(word)으로 보겠다 주소로 하면 4개(1000, 1001, 1002, 1003)
-#define WSIZE      4 
+#define WSIZE      8
 
 // 8바이트를 한 묶음(word)으로 보겠다 주소로 하면 8개 (1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007)
-#define DSIZE      8 
+#define DSIZE      16 
 
 // 힙(Heap) 메모리가 부족할 때, 운영체제로부터 한 번에 받아오는 메모리의 기본 단위 (보통 1개 페이지 크기)
 #define CHUNKSIZE (1<<12) 
@@ -84,12 +84,30 @@ team_t team = {
 // 현재 블록의 이전 블록의 시작 위치(bp)를 구하는 매크로 
 #define PREV_BLKP       ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
+// 전역 변수
+static char *heap_listp;
 
 /*
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
+    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1) 
+    {
+        return -1; 
+    }
+
+    PUT(heap_listp, 0); // alignment padding 
+    PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1)); // prologue header
+    PUT(heap_listp + (2 * WSIZE), PACK(0, 1)); // prologue footer
+    PUT(heap_listp + (3 * WSIZE), PACK(0, 1)); // epilogue header
+    heap_listp += (2 * WSIZE); 
+
+    // if (extend_heap(CHUNKSIZE/WSIZE) == NULL)
+    // {
+    //     return -1; 
+    // }
+
     return 0;
 }
 
@@ -135,4 +153,27 @@ void *mm_realloc(void *ptr, size_t size)
     memcpy(newptr, oldptr, copySize);
     mm_free(oldptr);
     return newptr;
+}
+
+static void *coalesce(void *bp)
+{
+
+}
+
+static void *extend_heap(size_t words)
+{
+    char *bp; 
+    size_t size; 
+
+    size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE; 
+    if ((long) (bp = mem_sbrk(size)) == -1) 
+    {
+        return NULL; 
+    }
+
+    PUT(HDRP(bp), PACK(size, 0));
+    PUT(FTRP(bp), PACK(size, 0));
+    // PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1)); 
+
+    return coalesce(bp);
 }
