@@ -1,4 +1,3 @@
-
 /*
  * mm-naive.c - The fastest, least memory-efficient malloc package.
  *
@@ -87,7 +86,6 @@ team_t team = {
 
 // 전역 변수
 static char *heap_listp;
-static char *next_fit_ptr; // next_fit 구현을 위한 포인터 
 
 static void *coalesce(void *bp)
 {
@@ -96,7 +94,7 @@ static void *coalesce(void *bp)
     size_t size = GET_SIZE(HDRP(bp));
 
     if (prev_alloc && next_alloc) {
-        /* nothing */
+        return bp;
     }
     else if (prev_alloc && !next_alloc) {
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
@@ -117,17 +115,13 @@ static void *coalesce(void *bp)
         bp = PREV_BLKP(bp);
     }
 
-    // rover가 병합된 블록 내부를 가리키면 시작점으로 조정 
-    if (next_fit_ptr >= (char *)bp && next_fit_ptr < NEXT_BLKP(bp)) {
-        next_fit_ptr = bp;
-    }
-
     return bp;
 }
 
 
 static void *extend_heap(size_t words)
 {
+    // words = 512 
     char *bp; 
     size_t size; 
 
@@ -159,8 +153,9 @@ static void *extend_heap(size_t words)
  */
 int mm_init(void)
 {
-    if ((heap_listp = mem_sbrk(4 * WSIZE)) == (void *)-1)
+    if ((heap_listp = mem_sbrk(4 * WSIZE)) == (void *)-1) {
         return -1;
+    }
 
     PUT(heap_listp, 0);
     PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1));
@@ -168,66 +163,43 @@ int mm_init(void)
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
     heap_listp += (2 * WSIZE);
 
-    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
+    if (extend_heap(CHUNKSIZE / WSIZE) == NULL) {
         return -1;
+    }
 
-    next_fit_ptr = heap_listp;
     return 0;
 }
 
 static void *find_fit(size_t asize)
 {
-    char *oldptr;
+    void *bp;
 
-    if (next_fit_ptr == NULL)
-        next_fit_ptr = heap_listp;
-
-    oldptr = next_fit_ptr;
-
-    // 1차 탐색: next_fit_ptr부터 epilogue 전까지 
-    // epilogue는 size가 0이기 때문에 거기에서 멈춤 
-    while (GET_SIZE(HDRP(next_fit_ptr)) > 0) {
-        if (!GET_ALLOC(HDRP(next_fit_ptr)) &&
-            asize <= GET_SIZE(HDRP(next_fit_ptr))) {
-            return next_fit_ptr;
+    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+        if (!GET_ALLOC(HDRP(bp)) && asize <= GET_SIZE(HDRP(bp))) {
+            return bp;
         }
-        next_fit_ptr = NEXT_BLKP(next_fit_ptr);
-    }
-
-    /* 2차 탐색: heap 시작부터 원래 시작점 직전까지 */
-    next_fit_ptr = heap_listp;
-    while (next_fit_ptr < oldptr) {
-        if (!GET_ALLOC(HDRP(next_fit_ptr)) &&
-            asize <= GET_SIZE(HDRP(next_fit_ptr))) {
-            return next_fit_ptr;
-        }
-        next_fit_ptr = NEXT_BLKP(next_fit_ptr);
     }
 
     return NULL;
 }
 
-static void place(void *bp, size_t asize)
+void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(HDRP(bp));
 
-    if ((csize - asize) >= (2 * DSIZE)) {
+    if ((csize - asize) >= (2 * DSIZE))
+    {
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
 
-        void *next_bp = NEXT_BLKP(bp);
-        PUT(HDRP(next_bp), PACK(csize - asize, 0));
-        PUT(FTRP(next_bp), PACK(csize - asize, 0));
-
-        /* 다음 탐색은 방금 생긴 free block부터 */
-        next_fit_ptr = next_bp;
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(csize - asize, 0)); 
+        PUT(FTRP(bp), PACK(csize - asize, 0));
     }
-    else {
+    else 
+    {
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
-
-        /* 다음 탐색은 그 다음 블록부터 */
-        next_fit_ptr = NEXT_BLKP(bp);
     }
 }
 
@@ -287,30 +259,17 @@ void mm_free(void *ptr)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-    // realloc 함수는 기존에 있던 데이터를 유지하면서 재할당을 하고 싶을때 사용한다 
-    // old block: [ A B C D E ]
-    // new block: [ A B C D E ? ? ? ? ? ]
+    void *oldptr = ptr;
+    void *newptr;
+    size_t copySize;
 
-    void *oldptr = ptr;   // 기존에 쓰고 있던 블록 주소
-    void *newptr;         // 새로 할당받을 블록 주소
-    size_t copySize;      // 기존 데이터 중 얼마나 복사할지 저장
-
-    newptr = mm_malloc(size);   // 먼저 새 크기의 블록을 새로 할당
+    newptr = mm_malloc(size);
     if (newptr == NULL)
-        return NULL;            // 새 블록 할당 실패 시 realloc 실패
-
-    copySize = GET_SIZE(HDRP(oldptr)) - DSIZE; 
-    // *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    // 기존 블록에서 복사할 크기를 읽어오려는 코드
-    // 다만 현재 allocator 구조와 완전히 맞는지 확인 필요
-
+        return NULL;
+    copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
     if (size < copySize)
-        copySize = size;        // 새 요청 크기보다 많이 복사하지 않도록 조정
-
-    memcpy(newptr, oldptr, copySize); // 기존 데이터 복사
-    mm_free(oldptr);                  // 기존 블록 반납 (필요하면 병합도 일어남)
-    return newptr;                    // 새 블록 주소 반환
+        copySize = size;
+    memcpy(newptr, oldptr, copySize);
+    mm_free(oldptr);
+    return newptr;
 }
-
-
-
